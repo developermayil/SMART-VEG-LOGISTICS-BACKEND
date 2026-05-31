@@ -1,29 +1,28 @@
-const sql = require('mssql');
+const sql = require('mssql/msnodesqlv8');
 
 const config = {
-  server: process.env.DB_SERVER || 'localhost',
-  port: parseInt(process.env.DB_PORT) || 1433,
-  database: process.env.DB_DATABASE || 'SmartVegLogistics',
-  user: process.env.DB_USER || 'sa',
-  password: process.env.DB_PASSWORD || '',
-  options: {
-    encrypt: process.env.DB_ENCRYPT === 'true',
-    trustServerCertificate: process.env.DB_TRUST_SERVER_CERTIFICATE !== 'false',
-    enableArithAbort: true,
-  },
-  pool: {
-    max: 10,
-    min: 0,
-    idleTimeoutMillis: 30000,
-  },
+  connectionString: `
+    Driver={ODBC Driver 17 for SQL Server};
+    Server=localhost;
+    Database=SmartVegLogistics;
+    Trusted_Connection=Yes;
+    TrustServerCertificate=Yes;
+  `,
+  driver: 'msnodesqlv8'
 };
 
 let pool = null;
 
 const getPool = async () => {
   if (!pool) {
-    pool = await sql.connect(config);
-    console.log('✅ SQL Server connected successfully');
+    try {
+      console.log('🔄 Connecting to SQL Server...');
+      pool = await sql.connect(config);
+      console.log('✅ SQL Server connected successfully!');
+    } catch (err) {
+      console.error('❌ SQL Connection Error:', err.message);
+      throw err;
+    }
   }
   return pool;
 };
@@ -116,7 +115,7 @@ const initializeDatabase = async () => {
     )
   `);
 
-  // Delivery Items table (stocks in a delivery)
+  // Delivery Items table
   await pool.request().query(`
     IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='DeliveryItems' AND xtype='U')
     CREATE TABLE DeliveryItems (

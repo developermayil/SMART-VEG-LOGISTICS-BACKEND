@@ -63,7 +63,7 @@ app.use((err, req, res, next) => {
 // Start server
 const startServer = async () => {
   try {
-    await initializeDatabase();
+    // await initializeDatabase();
     app.listen(PORT, () => {
       console.log(`\n🚛 Smart Veg Logistics API`);
       console.log(`✅ Server running on port ${PORT}`);
