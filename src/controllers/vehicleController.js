@@ -1,19 +1,26 @@
-const { getPool, sql } = require('../db/database');
+const Vehicle = require('../models/Vehicle');
+const Delivery = require('../models/Delivery');
 
 const getAllVehicles = async (req, res) => {
   try {
-    const pool = await getPool();
-    const result = await pool.request().query(`
-      SELECT v.*,
-        COUNT(d.id) AS total_deliveries,
-        SUM(CASE WHEN d.status = 'delivered' THEN 1 ELSE 0 END) AS completed_deliveries
-      FROM Vehicles v
-      LEFT JOIN Deliveries d ON v.id = d.vehicle_id
-      GROUP BY v.id, v.vehicle_number, v.vehicle_type, v.driver_name, v.driver_phone,
-               v.driver_license, v.capacity, v.status, v.created_at, v.updated_at
-      ORDER BY v.created_at DESC
-    `);
-    res.json({ success: true, data: result.recordset, count: result.recordset.length });
+    const vehicles = await Vehicle.find().sort({ createdAt: -1 }).lean();
+
+    const stats = await Delivery.aggregate([
+      { $group: {
+          _id: '$vehicle_id',
+          total_deliveries: { $sum: 1 },
+          completed_deliveries: { $sum: { $cond: [{ $eq: ['$status', 'delivered'] }, 1, 0] } }
+      }}
+    ]);
+    const statsMap = Object.fromEntries(stats.map(s => [String(s._id), s]));
+
+    const data = vehicles.map(v => ({
+      ...v,
+      total_deliveries: statsMap[String(v._id)]?.total_deliveries || 0,
+      completed_deliveries: statsMap[String(v._id)]?.completed_deliveries || 0
+    }));
+
+    res.json({ success: true, data, count: data.length });
   } catch (err) {
     console.error(err);
     res.status(500).json({ success: false, message: 'Server error' });
@@ -22,14 +29,10 @@ const getAllVehicles = async (req, res) => {
 
 const getVehicleById = async (req, res) => {
   try {
-    const pool = await getPool();
-    const result = await pool.request()
-      .input('id', sql.Int, req.params.id)
-      .query('SELECT * FROM Vehicles WHERE id = @id');
-    if (result.recordset.length === 0) {
+    const vehicle = await Vehicle.findById(req.params.id);
+    if (!vehicle)
       return res.status(404).json({ success: false, message: 'Vehicle not found' });
-    }
-    res.json({ success: true, data: result.recordset[0] });
+    res.json({ success: true, data: vehicle });
   } catch (err) {
     res.status(500).json({ success: false, message: 'Server error' });
   }
@@ -38,24 +41,14 @@ const getVehicleById = async (req, res) => {
 const createVehicle = async (req, res) => {
   try {
     const { vehicle_number, vehicle_type, driver_name, driver_phone, driver_license, capacity } = req.body;
-    if (!vehicle_number || !driver_name || !driver_phone || !capacity) {
+    if (!vehicle_number || !driver_name || !driver_phone || !capacity)
       return res.status(400).json({ success: false, message: 'Vehicle number, driver name, phone, and capacity are required' });
-    }
-    const pool = await getPool();
-    const result = await pool.request()
-      .input('vehicle_number', sql.NVarChar, vehicle_number)
-      .input('vehicle_type', sql.NVarChar, vehicle_type || 'Truck')
-      .input('driver_name', sql.NVarChar, driver_name)
-      .input('driver_phone', sql.NVarChar, driver_phone)
-      .input('driver_license', sql.NVarChar, driver_license || '')
-      .input('capacity', sql.Decimal(10, 2), capacity)
-      .query(`
-        INSERT INTO Vehicles (vehicle_number, vehicle_type, driver_name, driver_phone, driver_license, capacity)
-        OUTPUT INSERTED.*
-        VALUES (@vehicle_number, @vehicle_type, @driver_name, @driver_phone, @driver_license, @capacity)
-      `);
-    res.status(201).json({ success: true, message: 'Vehicle added successfully', data: result.recordset[0] });
+
+    const vehicle = await Vehicle.create({ vehicle_number, vehicle_type, driver_name, driver_phone, driver_license, capacity });
+    res.status(201).json({ success: true, message: 'Vehicle added successfully', data: vehicle });
   } catch (err) {
+    if (err.code === 11000)
+      return res.status(409).json({ success: false, message: 'Vehicle number already exists' });
     console.error(err);
     res.status(500).json({ success: false, message: 'Server error' });
   }
@@ -64,27 +57,14 @@ const createVehicle = async (req, res) => {
 const updateVehicle = async (req, res) => {
   try {
     const { vehicle_number, vehicle_type, driver_name, driver_phone, driver_license, capacity, status } = req.body;
-    const pool = await getPool();
-    const result = await pool.request()
-      .input('id', sql.Int, req.params.id)
-      .input('vehicle_number', sql.NVarChar, vehicle_number)
-      .input('vehicle_type', sql.NVarChar, vehicle_type)
-      .input('driver_name', sql.NVarChar, driver_name)
-      .input('driver_phone', sql.NVarChar, driver_phone)
-      .input('driver_license', sql.NVarChar, driver_license)
-      .input('capacity', sql.Decimal(10, 2), capacity)
-      .input('status', sql.NVarChar, status || 'available')
-      .query(`
-        UPDATE Vehicles SET vehicle_number=@vehicle_number, vehicle_type=@vehicle_type,
-          driver_name=@driver_name, driver_phone=@driver_phone, driver_license=@driver_license,
-          capacity=@capacity, status=@status, updated_at=GETDATE()
-        OUTPUT INSERTED.*
-        WHERE id = @id
-      `);
-    if (result.recordset.length === 0) {
+    const vehicle = await Vehicle.findByIdAndUpdate(
+      req.params.id,
+      { vehicle_number, vehicle_type, driver_name, driver_phone, driver_license, capacity, status },
+      { new: true, runValidators: true }
+    );
+    if (!vehicle)
       return res.status(404).json({ success: false, message: 'Vehicle not found' });
-    }
-    res.json({ success: true, message: 'Vehicle updated successfully', data: result.recordset[0] });
+    res.json({ success: true, message: 'Vehicle updated successfully', data: vehicle });
   } catch (err) {
     res.status(500).json({ success: false, message: 'Server error' });
   }
@@ -92,13 +72,9 @@ const updateVehicle = async (req, res) => {
 
 const deleteVehicle = async (req, res) => {
   try {
-    const pool = await getPool();
-    const result = await pool.request()
-      .input('id', sql.Int, req.params.id)
-      .query('DELETE FROM Vehicles OUTPUT DELETED.id WHERE id = @id');
-    if (result.recordset.length === 0) {
+    const vehicle = await Vehicle.findByIdAndDelete(req.params.id);
+    if (!vehicle)
       return res.status(404).json({ success: false, message: 'Vehicle not found' });
-    }
     res.json({ success: true, message: 'Vehicle deleted successfully' });
   } catch (err) {
     res.status(500).json({ success: false, message: 'Server error' });
@@ -107,10 +83,8 @@ const deleteVehicle = async (req, res) => {
 
 const getAvailableVehicles = async (req, res) => {
   try {
-    const pool = await getPool();
-    const result = await pool.request()
-      .query("SELECT * FROM Vehicles WHERE status = 'available' ORDER BY capacity DESC");
-    res.json({ success: true, data: result.recordset });
+    const vehicles = await Vehicle.find({ status: 'available' }).sort({ capacity: -1 });
+    res.json({ success: true, data: vehicles });
   } catch (err) {
     res.status(500).json({ success: false, message: 'Server error' });
   }

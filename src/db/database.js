@@ -1,135 +1,17 @@
-const sql = require('mssql/msnodesqlv8');
+const mongoose = require('mongoose');
 
-const config = {
-  connectionString: `
-    Driver={ODBC Driver 17 for SQL Server};
-    Server=localhost;
-    Database=SmartVegLogistics;
-    Trusted_Connection=Yes;
-    TrustServerCertificate=Yes;
-  `,
-  driver: 'msnodesqlv8'
-};
+const connectDB = async () => {
+  try {
+    const uri = process.env.MONGODB_URI;
+    if (!uri) throw new Error('MONGODB_URI is not defined in environment variables');
 
-let pool = null;
-
-const getPool = async () => {
-  if (!pool) {
-    try {
-      console.log('🔄 Connecting to SQL Server...');
-      pool = await sql.connect(config);
-      console.log('✅ SQL Server connected successfully!');
-    } catch (err) {
-      console.error('❌ SQL Connection Error:', err.message);
-      throw err;
-    }
+    console.log('🔄 Connecting to MongoDB Atlas...');
+    await mongoose.connect(uri);
+    console.log('✅ MongoDB Atlas connected successfully!');
+  } catch (err) {
+    console.error('❌ MongoDB Connection Error:', err.message);
+    throw err;
   }
-  return pool;
 };
 
-const initializeDatabase = async () => {
-  const pool = await getPool();
-
-  // Users table
-  await pool.request().query(`
-    IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='Users' AND xtype='U')
-    CREATE TABLE Users (
-      id INT IDENTITY(1,1) PRIMARY KEY,
-      username NVARCHAR(100) NOT NULL UNIQUE,
-      email NVARCHAR(255) NOT NULL UNIQUE,
-      password NVARCHAR(255) NOT NULL,
-      role NVARCHAR(50) DEFAULT 'admin',
-      created_at DATETIME DEFAULT GETDATE()
-    )
-  `);
-
-  // Farmers table
-  await pool.request().query(`
-    IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='Farmers' AND xtype='U')
-    CREATE TABLE Farmers (
-      id INT IDENTITY(1,1) PRIMARY KEY,
-      name NVARCHAR(200) NOT NULL,
-      village NVARCHAR(200) NOT NULL,
-      district NVARCHAR(200) DEFAULT 'Tamil Nadu',
-      phone NVARCHAR(20) NOT NULL,
-      alternate_phone NVARCHAR(20),
-      email NVARCHAR(255),
-      bank_account NVARCHAR(50),
-      ifsc_code NVARCHAR(20),
-      created_at DATETIME DEFAULT GETDATE(),
-      updated_at DATETIME DEFAULT GETDATE()
-    )
-  `);
-
-  // Vehicles table
-  await pool.request().query(`
-    IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='Vehicles' AND xtype='U')
-    CREATE TABLE Vehicles (
-      id INT IDENTITY(1,1) PRIMARY KEY,
-      vehicle_number NVARCHAR(50) NOT NULL UNIQUE,
-      vehicle_type NVARCHAR(100) DEFAULT 'Truck',
-      driver_name NVARCHAR(200) NOT NULL,
-      driver_phone NVARCHAR(20) NOT NULL,
-      driver_license NVARCHAR(50),
-      capacity DECIMAL(10,2) NOT NULL,
-      status NVARCHAR(50) DEFAULT 'available',
-      created_at DATETIME DEFAULT GETDATE(),
-      updated_at DATETIME DEFAULT GETDATE()
-    )
-  `);
-
-  // Stocks table
-  await pool.request().query(`
-    IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='Stocks' AND xtype='U')
-    CREATE TABLE Stocks (
-      id INT IDENTITY(1,1) PRIMARY KEY,
-      vegetable NVARCHAR(200) NOT NULL,
-      quantity DECIMAL(10,2) NOT NULL,
-      unit NVARCHAR(20) DEFAULT 'kg',
-      price_per_unit DECIMAL(10,2) NOT NULL,
-      farmer_id INT FOREIGN KEY REFERENCES Farmers(id),
-      purchase_date DATE DEFAULT GETDATE(),
-      notes NVARCHAR(500),
-      created_at DATETIME DEFAULT GETDATE(),
-      updated_at DATETIME DEFAULT GETDATE()
-    )
-  `);
-
-  // Deliveries table
-  await pool.request().query(`
-    IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='Deliveries' AND xtype='U')
-    CREATE TABLE Deliveries (
-      id INT IDENTITY(1,1) PRIMARY KEY,
-      delivery_number NVARCHAR(50) NOT NULL UNIQUE,
-      vehicle_id INT FOREIGN KEY REFERENCES Vehicles(id),
-      destination NVARCHAR(300) NOT NULL,
-      destination_market NVARCHAR(200),
-      total_quantity DECIMAL(10,2),
-      total_value DECIMAL(12,2),
-      status NVARCHAR(50) DEFAULT 'pending',
-      scheduled_date DATETIME,
-      delivered_date DATETIME,
-      driver_notes NVARCHAR(500),
-      created_at DATETIME DEFAULT GETDATE(),
-      updated_at DATETIME DEFAULT GETDATE()
-    )
-  `);
-
-  // Delivery Items table
-  await pool.request().query(`
-    IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='DeliveryItems' AND xtype='U')
-    CREATE TABLE DeliveryItems (
-      id INT IDENTITY(1,1) PRIMARY KEY,
-      delivery_id INT FOREIGN KEY REFERENCES Deliveries(id),
-      stock_id INT FOREIGN KEY REFERENCES Stocks(id),
-      quantity DECIMAL(10,2) NOT NULL,
-      price_per_unit DECIMAL(10,2) NOT NULL,
-      selling_price DECIMAL(10,2),
-      created_at DATETIME DEFAULT GETDATE()
-    )
-  `);
-
-  console.log('✅ Database tables initialized');
-};
-
-module.exports = { getPool, initializeDatabase, sql };
+module.exports = { connectDB };

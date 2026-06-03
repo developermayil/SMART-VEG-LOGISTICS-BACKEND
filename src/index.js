@@ -4,7 +4,7 @@ const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
 const rateLimit = require('express-rate-limit');
-const { initializeDatabase } = require('./db/database');
+const { connectDB } = require('./db/database');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -12,13 +12,13 @@ const PORT = process.env.PORT || 5000;
 // Security middleware
 app.use(helmet());
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+  origin: process.env.FRONTEND_URL || 'http://localhost:3001',
   credentials: true,
 }));
 
 // Rate limiting
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
+  windowMs: 15 * 60 * 1000,
   max: 200,
   message: { success: false, message: 'Too many requests, please try again later.' }
 });
@@ -63,7 +63,7 @@ app.use((err, req, res, next) => {
 // Start server
 const startServer = async () => {
   try {
-    // await initializeDatabase();
+    await connectDB();
     app.listen(PORT, () => {
       console.log(`\n🚛 Smart Veg Logistics API`);
       console.log(`✅ Server running on port ${PORT}`);

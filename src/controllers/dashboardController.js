@@ -1,57 +1,62 @@
-const { getPool } = require('../db/database');
+const Stock = require('../models/Stock');
+const Farmer = require('../models/Farmer');
+const Vehicle = require('../models/Vehicle');
+const Delivery = require('../models/Delivery');
 
 const getDashboardStats = async (req, res) => {
   try {
-    const pool = await getPool();
-
-    const [stocks, farmers, vehicles, deliveries] = await Promise.all([
-      pool.request().query(`
-        SELECT COUNT(*) AS total_items, COALESCE(SUM(quantity), 0) AS total_quantity,
-               COALESCE(SUM(quantity * price_per_unit), 0) AS total_stock_value
-        FROM Stocks
-      `),
-      pool.request().query('SELECT COUNT(*) AS total_farmers FROM Farmers'),
-      pool.request().query(`
-        SELECT COUNT(*) AS total_vehicles,
-               SUM(CASE WHEN status='available' THEN 1 ELSE 0 END) AS available,
-               SUM(CASE WHEN status='in-transit' THEN 1 ELSE 0 END) AS in_transit
-        FROM Vehicles
-      `),
-      pool.request().query(`
-        SELECT COUNT(*) AS total_deliveries,
-               SUM(CASE WHEN status='delivered' THEN 1 ELSE 0 END) AS completed,
-               SUM(CASE WHEN status='in-transit' THEN 1 ELSE 0 END) AS active,
-               COALESCE(SUM(CASE WHEN status='delivered' THEN total_value ELSE 0 END), 0) AS revenue
-        FROM Deliveries
-      `)
+    const [stockAgg, totalFarmers, vehicleAgg, deliveryAgg, recentDeliveries, stockByVeg] = await Promise.all([
+      Stock.aggregate([
+        { $group: {
+            _id: null,
+            total_items: { $sum: 1 },
+            total_quantity: { $sum: '$quantity' },
+            total_stock_value: { $sum: { $multiply: ['$quantity', '$price_per_unit'] } }
+        }}
+      ]),
+      Farmer.countDocuments(),
+      Vehicle.aggregate([
+        { $group: {
+            _id: null,
+            total_vehicles: { $sum: 1 },
+            available: { $sum: { $cond: [{ $eq: ['$status', 'available'] }, 1, 0] } },
+            in_transit: { $sum: { $cond: [{ $eq: ['$status', 'in-transit'] }, 1, 0] } }
+        }}
+      ]),
+      Delivery.aggregate([
+        { $group: {
+            _id: null,
+            total_deliveries: { $sum: 1 },
+            completed: { $sum: { $cond: [{ $eq: ['$status', 'delivered'] }, 1, 0] } },
+            active: { $sum: { $cond: [{ $eq: ['$status', 'in-transit'] }, 1, 0] } },
+            revenue: { $sum: { $cond: [{ $eq: ['$status', 'delivered'] }, '$total_value', 0] } }
+        }}
+      ]),
+      Delivery.find()
+        .populate('vehicle_id', 'vehicle_number driver_name')
+        .sort({ createdAt: -1 })
+        .limit(5)
+        .select('delivery_number destination status total_value scheduled_date'),
+      Stock.aggregate([
+        { $group: {
+            _id: '$vegetable',
+            total_quantity: { $sum: '$quantity' },
+            avg_price: { $avg: '$price_per_unit' }
+        }},
+        { $project: { vegetable: '$_id', total_quantity: 1, avg_price: 1, _id: 0 } },
+        { $sort: { total_quantity: -1 } }
+      ])
     ]);
-
-    // Recent deliveries
-    const recentDeliveries = await pool.request().query(`
-      SELECT TOP 5 d.delivery_number, d.destination, d.status, d.total_value, d.scheduled_date,
-             v.vehicle_number, v.driver_name
-      FROM Deliveries d
-      LEFT JOIN Vehicles v ON d.vehicle_id = v.id
-      ORDER BY d.created_at DESC
-    `);
-
-    // Stock by vegetable
-    const stockByVeg = await pool.request().query(`
-      SELECT vegetable, SUM(quantity) AS total_quantity, AVG(price_per_unit) AS avg_price
-      FROM Stocks
-      GROUP BY vegetable
-      ORDER BY total_quantity DESC
-    `);
 
     res.json({
       success: true,
       data: {
-        stocks: stocks.recordset[0],
-        farmers: farmers.recordset[0],
-        vehicles: vehicles.recordset[0],
-        deliveries: deliveries.recordset[0],
-        recent_deliveries: recentDeliveries.recordset,
-        stock_by_vegetable: stockByVeg.recordset
+        stocks: stockAgg[0] || { total_items: 0, total_quantity: 0, total_stock_value: 0 },
+        farmers: { total_farmers: totalFarmers },
+        vehicles: vehicleAgg[0] || { total_vehicles: 0, available: 0, in_transit: 0 },
+        deliveries: deliveryAgg[0] || { total_deliveries: 0, completed: 0, active: 0, revenue: 0 },
+        recent_deliveries: recentDeliveries,
+        stock_by_vegetable: stockByVeg
       }
     });
   } catch (err) {
