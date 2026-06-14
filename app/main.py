@@ -9,10 +9,17 @@ from slowapi.errors import RateLimitExceeded
 from datetime import datetime
 import os
 
+
+# Add this import at the top with other routes
+# from app.routes import ai
+
+# Add this with other router includes
+
+
 load_dotenv()
 
 from app.db.database import connect_db
-from app.routes import auth, dashboard, farmers, stocks, vehicles, deliveries, customers, orders
+from app.routes import auth, dashboard, farmers, stocks, vehicles, deliveries, customers, orders,ai,ml_predictions
 
 
 @asynccontextmanager
@@ -45,6 +52,8 @@ app.add_middleware(
 )
 
 # Routes
+app.include_router(ml_predictions.router)
+app.include_router(ai.router)
 app.include_router(auth.router)
 app.include_router(dashboard.router)
 app.include_router(farmers.router)
