@@ -8,11 +8,19 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from datetime import datetime
 import os
+import traceback
+
+
+# Add this import at the top with other routes
+# from app.routes import ai
+
+# Add this with other router includes
+
 
 load_dotenv()
 
 from app.db.database import connect_db
-from app.routes import auth, dashboard, farmers, stocks, vehicles, deliveries, customers, orders
+from app.routes import auth, dashboard, farmers, stocks, vehicles, deliveries, customers, orders,ai,ml_predictions
 
 
 @asynccontextmanager
@@ -45,6 +53,8 @@ app.add_middleware(
 )
 
 # Routes
+app.include_router(ml_predictions.router)
+app.include_router(ai.router)
 app.include_router(auth.router)
 app.include_router(dashboard.router)
 app.include_router(farmers.router)
@@ -68,7 +78,14 @@ async def health():
 # Global error handler
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    return JSONResponse(
+    print("=" * 60)
+    print(f"ERROR on {request.method} {request.url}")
+    traceback.print_exc()
+    print("=" * 60)
+    response = JSONResponse(
         status_code=500,
-        content={"success": False, "message": "Internal server error"},
+        content={"success": False, "message": str(exc)},
     )
+    response.headers["Access-Control-Allow-Origin"] = frontend_url
+    response.headers["Access-Control-Allow-Credentials"] = "true"
+    return response

@@ -9,7 +9,7 @@ from bson import ObjectId
 router = APIRouter(prefix="/api/dashboard", tags=["Dashboard"])
 
 
-@router.get("")
+@router.get("/status")
 async def get_dashboard_stats(_=Depends(get_current_user)):
     stock_col = Stock.get_motor_collection()
     vehicle_col = Vehicle.get_motor_collection()
